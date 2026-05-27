@@ -105,34 +105,52 @@ class GraspMetrics:
         self.xy_error_sum = 0.0
         self.wh_error_sum = 0.0
 
-    def update(self, pred_params: torch.Tensor, gt_params: torch.Tensor):
+    def update(self, pred_params: torch.Tensor, gt_params_list: list):
         """
-        Update metrics with a batch.
+        Update metrics with a batch (multi-grasp GT support).
+
+        A prediction is correct if it matches ANY of the GT grasps.
 
         Args:
             pred_params: [B, 5] predicted (x, y, w, h, theta)
-            gt_params: [B, 5] ground truth (x, y, w, h, theta)
+            gt_params_list: list of [N_i, 5] tensors, one per sample.
+                            Each has N_i GT grasps.
         """
         pred_np = pred_params.detach().cpu().numpy()
-        gt_np = gt_params.detach().cpu().numpy()
         batch_size = pred_np.shape[0]
 
         for i in range(batch_size):
             pred = pred_np[i]
-            gt = gt_np[i]
+            gt_all = gt_params_list[i].detach().cpu().numpy()  # [N_i, 5]
 
-            iou = compute_grasp_iou(pred, gt)
-            angle_diff = compute_angle_diff(
-                math.degrees(pred[4]), math.degrees(gt[4])
-            )
+            # Find best matching GT (highest IoU)
+            best_iou = 0.0
+            best_angle_diff = 180.0
+            best_xy_err = float("inf")
+            best_wh_err = float("inf")
 
-            self.iou_sum += iou
-            self.angle_diff_sum += angle_diff
-            self.xy_error_sum += np.sqrt((pred[0] - gt[0]) ** 2 + (pred[1] - gt[1]) ** 2)
-            self.wh_error_sum += np.sqrt((pred[2] - gt[2]) ** 2 + (pred[3] - gt[3]) ** 2)
+            for j in range(gt_all.shape[0]):
+                gt = gt_all[j]
+                iou = compute_grasp_iou(pred, gt)
+                angle_diff = compute_angle_diff(
+                    math.degrees(pred[4]), math.degrees(gt[4])
+                )
+                xy_err = np.sqrt((pred[0] - gt[0]) ** 2 + (pred[1] - gt[1]) ** 2)
+                wh_err = np.sqrt((pred[2] - gt[2]) ** 2 + (pred[3] - gt[3]) ** 2)
 
-            iou_ok = iou >= self.iou_threshold
-            angle_ok = angle_diff <= self.angle_threshold
+                if iou > best_iou:
+                    best_iou = iou
+                    best_angle_diff = angle_diff
+                    best_xy_err = xy_err
+                    best_wh_err = wh_err
+
+            self.iou_sum += best_iou
+            self.angle_diff_sum += best_angle_diff
+            self.xy_error_sum += best_xy_err
+            self.wh_error_sum += best_wh_err
+
+            iou_ok = best_iou >= self.iou_threshold
+            angle_ok = best_angle_diff <= self.angle_threshold
 
             if iou_ok:
                 self.iou_correct += 1

@@ -60,13 +60,12 @@ def prepare_batch(batch, processor, device, image_size=416):
     input_ids = inputs["input_ids"].to(device)
     attention_mask = inputs["attention_mask"].to(device)
 
-    # Parse labels
+    # Parse labels — returns list of [N_i, 5] tensors (multi-grasp per sample)
     labels_raw = batch["positive_label"]
     if isinstance(labels_raw, torch.Tensor):
-        labels = torch.stack([parse_grasp_label(labels_raw[i], image_size) for i in range(labels_raw.shape[0])])
+        labels = [parse_grasp_label(labels_raw[i], image_size).to(device) for i in range(labels_raw.shape[0])]
     else:
-        labels = torch.stack([parse_grasp_label(l, image_size) for l in labels_raw])
-    labels = labels.to(device)
+        labels = [parse_grasp_label(l, image_size).to(device) for l in labels_raw]
 
     return pixel_values, input_ids, attention_mask, labels
 

@@ -9,6 +9,7 @@ Usage:
 """
 
 import argparse
+import math
 import os
 import json
 from pathlib import Path
@@ -53,15 +54,14 @@ def evaluate(model, dataloader, processor, device, cfg, visualize=False, num_vis
 
             # Store predictions in degrees for readability
             pred_deg = output["params_deg"].cpu().numpy()
-            gt_deg = labels.clone()
-            gt_deg[:, 4] = gt_deg[:, 4] * (180.0 / torch.pi)
-            gt_deg_np = gt_deg.cpu().numpy()
             for i in range(pred_deg.shape[0]):
+                gt_i = labels[i].cpu().clone()
+                gt_i[:, 4] = gt_i[:, 4] * (180.0 / math.pi)
                 all_predictions.append({
                     "sha": batch["sha"][i],
                     "instruction": batch["instruction"][i],
                     "pred": pred_deg[i].tolist(),
-                    "gt": gt_deg_np[i].tolist(),
+                    "gt": gt_i.numpy().tolist(),
                 })
 
             # Visualize
@@ -75,8 +75,11 @@ def evaluate(model, dataloader, processor, device, cfg, visualize=False, num_vis
                     img_np = (img.permute(1, 2, 0).numpy() * 255).astype(np.uint8)
                     img_bgr = img_np[:, :, ::-1].copy()
 
-                    pred_p = tuple(pred_np[i])
-                    gt_p = tuple(gt_np[i])
+                    pred_p = tuple(pred_deg[i])
+                    # Use first GT grasp for visualization
+                    gt_first = labels[i][0].cpu().numpy()
+                    gt_first[4] = math.degrees(gt_first[4])
+                    gt_p = tuple(gt_first)
 
                     vis = visualize_prediction(
                         img_bgr,
