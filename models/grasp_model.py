@@ -60,6 +60,8 @@ class GraspCLIPModel(nn.Module):
     def encode_image(self, pixel_values: torch.Tensor) -> torch.Tensor:
         """Encode images through CLIP vision encoder."""
         outputs = self.clip.get_image_features(pixel_values=pixel_values)
+        if not isinstance(outputs, torch.Tensor):
+            outputs = outputs.pooler_output if hasattr(outputs, 'pooler_output') else outputs.last_hidden_state[:, 0]
         return outputs
 
     def encode_text(self, input_ids: torch.Tensor, attention_mask: torch.Tensor) -> torch.Tensor:
@@ -68,6 +70,8 @@ class GraspCLIPModel(nn.Module):
             input_ids=input_ids,
             attention_mask=attention_mask,
         )
+        if not isinstance(outputs, torch.Tensor):
+            outputs = outputs.pooler_output if hasattr(outputs, 'pooler_output') else outputs.last_hidden_state[:, 0]
         return outputs
 
     def forward(
