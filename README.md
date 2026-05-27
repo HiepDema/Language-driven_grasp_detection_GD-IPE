@@ -144,9 +144,20 @@ Each sample may have multiple valid grasp poses (e.g., 4 rectangles). The pipeli
 - **Training loss:** computes loss against each GT grasp, takes the minimum → model isn't penalized for picking any valid grasp
 - **Evaluation:** prediction is successful if it matches at least one GT grasp
 
-## Label Format
+## Data Format
 
-Raw labels from Grasp-Anything-pp: `[N, 6]` tensor per sample
+**File naming convention:**
+```
+images/               abc123.jpg           ← 1 image
+grasp_instructions/   abc123_1_1.pkl       ← multiple instructions per image
+                      abc123_1_2.pkl
+grasp_label_positive/ abc123_1_1.pt        ← 1 label per instruction
+                      abc123_1_2.pt
+```
+
+Each sample ID (e.g., `abc123_1_1`) maps to one instruction + one label. The corresponding image is found by stripping the `_N_N` suffix → `abc123.jpg`.
+
+**Label format:** `[N, 6]` tensor per sample
 - Column 0: quality/confidence score (discarded)
 - Columns 1-5: `(x, y, w, h, angle_deg)` in pixel coordinates
 

@@ -78,11 +78,10 @@ class GraspAnythingDataset(Dataset):
             else:
                 instr_shas = {f.stem for f in self.instructions_dir.glob("*.pkl")}
                 label_shas = {f.stem for f in self.labels_dir.glob("*.pt")}
+                common = instr_shas & label_shas
                 if self.load_images and self.images_dir.exists():
                     image_shas = {f.stem for f in self.images_dir.glob("*.jpg")}
-                    common = instr_shas & label_shas & image_shas
-                else:
-                    common = instr_shas & label_shas
+                    common = {s for s in common if self._get_image_sha(s) in image_shas}
                 self.shas = sorted(common)
 
         if transform is not None:
@@ -98,6 +97,12 @@ class GraspAnythingDataset(Dataset):
             ])
 
         print(f"GraspAnythingDataset: {len(self.shas)} samples loaded")
+
+    @staticmethod
+    def _get_image_sha(sample_id: str) -> str:
+        """Strip _N_N suffix from sample ID to get image filename."""
+        import re
+        return re.sub(r'(_\d+)+$', '', sample_id)
 
     def __len__(self):
         return len(self.shas)
@@ -167,8 +172,12 @@ class GraspAnythingDataset(Dataset):
             positive_label = torch.tensor(positive_label, dtype=torch.float32)
 
         # Load image
+        # Sample ID is like abc_1_1, image file is abc.jpg
         if self.load_images:
-            img_path = self.images_dir / f"{sha}.jpg"
+            image_sha = self._get_image_sha(sha)
+            img_path = self.images_dir / f"{image_sha}.jpg"
+            if not img_path.exists():
+                img_path = self.images_dir / f"{image_sha}.png"
             image = Image.open(img_path).convert("RGB")
             if self.transform:
                 image = self.transform(image)

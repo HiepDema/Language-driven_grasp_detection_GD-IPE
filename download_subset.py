@@ -66,6 +66,17 @@ def download_with_hf_hub(repo_id, filename, local_dir, repo_type="dataset"):
     return path
 
 
+def get_image_sha(sample_id):
+    """
+    Extract the base image SHA from a sample ID.
+    Sample IDs look like: abc123_1_1 (instruction/label)
+    Image files are just: abc123.jpg
+    Strip trailing _digit_digit suffix to get the image name.
+    """
+    import re
+    return re.sub(r'(_\d+)+$', '', sample_id)
+
+
 def extract_subset_from_zip(zip_path, output_dir, target_shas=None, max_files=None):
     """Extract files from zip, optionally filtering by SHA names."""
     os.makedirs(output_dir, exist_ok=True)
@@ -87,6 +98,31 @@ def extract_subset_from_zip(zip_path, output_dir, target_shas=None, max_files=No
             extracted.append(sha)
             if max_files and len(extracted) >= max_files:
                 break
+    return extracted
+
+
+def extract_images_from_zip(zip_path, output_dir, target_image_shas):
+    """
+    Extract images from zip, filtering by base image SHAs.
+    Image files are named like abc123.jpg (no suffix).
+    """
+    os.makedirs(output_dir, exist_ok=True)
+    extracted = []
+    with zipfile.ZipFile(zip_path, "r") as zf:
+        names = zf.namelist()
+        for name in tqdm(names, desc=f"Extracting images"):
+            if name.endswith("/"):
+                continue
+            basename = os.path.basename(name)
+            img_sha = os.path.splitext(basename)[0]
+            if img_sha not in target_image_shas:
+                continue
+            out_path = os.path.join(output_dir, basename)
+            if not os.path.exists(out_path):
+                data = zf.read(name)
+                with open(out_path, "wb") as f:
+                    f.write(data)
+            extracted.append(img_sha)
     return extracted
 
 
@@ -218,9 +254,14 @@ def main():
             print(f"  [SKIP] {image_zip_path} already exists")
 
         # Extract subset of images
+        # Sample IDs are like abc_1_1, but image files are abc.jpg
+        # So we need to map sample SHAs -> image SHAs (strip _N_N suffix)
+        image_shas_needed = {get_image_sha(s) for s in subset_shas}
+        print(f"  Unique images needed: {len(image_shas_needed)}")
+
         images_dir = data_dir / "images"
-        extracted_imgs = extract_subset_from_zip(
-            image_zip_path, str(images_dir), target_shas=subset_shas
+        extracted_imgs = extract_images_from_zip(
+            image_zip_path, str(images_dir), target_image_shas=image_shas_needed
         )
         print(f"  Extracted {len(extracted_imgs)} images")
     else:
@@ -241,15 +282,16 @@ def main():
     label_shas = {f.stem for f in labels_dir.glob("*.pt")} if labels_dir.exists() else set()
     image_shas = {f.stem for f in images_dir.glob("*.jpg")} if images_dir.exists() else set()
 
+    # Sample IDs (abc_1_1) must have matching instruction + label + image
+    # Image SHA = strip _N_N suffix from sample ID
+    common = instr_shas & label_shas
     if image_shas:
-        common = instr_shas & label_shas & image_shas
-    else:
-        common = instr_shas & label_shas
+        common = {s for s in common if get_image_sha(s) in image_shas}
 
     print(f"  Instructions: {len(instr_shas)}")
     print(f"  Labels: {len(label_shas)}")
-    print(f"  Images: {len(image_shas)}")
-    print(f"  Common (matched): {len(common)}")
+    print(f"  Images: {len(image_shas)} (unique base images)")
+    print(f"  Common (matched samples): {len(common)}")
 
     # Save final matched list
     matched_path = data_dir / "matched_shas.txt"
