@@ -52,11 +52,15 @@ class GraspHead(nn.Module):
         theta = torch.atan2(sin_theta, cos_theta)
 
         params = torch.cat([xy, wh, theta], dim=-1)
+        angle_deg = theta * (180.0 / torch.pi)
+        params_deg = torch.cat([xy, wh, angle_deg], dim=-1)
 
         return {
             "xy": xy,
             "wh": wh,
             "angle": theta,
+            "angle_deg": angle_deg,
             "sin_cos": angle_sincos,
             "params": params,
+            "params_deg": params_deg,
         }

@@ -41,6 +41,16 @@ def parse_grasp_label(label_tensor: torch.Tensor, image_size: int = 416) -> torc
         # Already (x, y, w, h, theta) - just normalize
         return _normalize_params(label, image_size)
 
+    if label.dim() == 1 and label.shape[0] == 6:
+        # Format: (quality, x, y, w, h, angle_deg)
+        # Skip quality (col 0), take cols 1-5, convert angle from degrees to radians
+        return _normalize_params_with_deg_angle(label[1:], image_size)
+
+    if label.dim() == 2 and label.shape[-1] == 6:
+        # [N, 6] format: each row is (quality, x, y, w, h, angle_deg)
+        # Take the best grasp (first row, highest quality), skip quality column
+        return _normalize_params_with_deg_angle(label[0, 1:], image_size)
+
     if label.dim() == 2 and label.shape[-1] == 5:
         # [N, 5] - take first grasp
         return _normalize_params(label[0], image_size)
@@ -70,6 +80,32 @@ def parse_grasp_label(label_tensor: torch.Tensor, image_size: int = 416) -> torc
 
     # Cannot parse - return zeros
     return torch.zeros(5, dtype=torch.float32)
+
+
+def _normalize_params_with_deg_angle(params: torch.Tensor, image_size: int) -> torch.Tensor:
+    """
+    Normalize (x, y, w, h, angle_deg) from pixel space.
+    Angle is expected in degrees [0, 180) and converted to radians [-pi/2, pi/2].
+    """
+    x, y, w, h, angle_deg = params[0], params[1], params[2], params[3], params[4]
+
+    x = x / image_size
+    y = y / image_size
+    w = w / image_size
+    h = h / image_size
+
+    # Convert degrees [0, 180) to radians [-pi/2, pi/2]
+    angle_rad = float(angle_deg)
+    if angle_rad > 90.0:
+        angle_rad = angle_rad - 180.0
+    angle_rad = math.radians(angle_rad)
+
+    x = torch.clamp(x, 0.0, 1.0)
+    y = torch.clamp(y, 0.0, 1.0)
+    w = torch.clamp(w, 0.0, 1.0)
+    h = torch.clamp(h, 0.0, 1.0)
+
+    return torch.tensor([float(x), float(y), float(w), float(h), angle_rad], dtype=torch.float32)
 
 
 def _normalize_params(params: torch.Tensor, image_size: int) -> torch.Tensor:

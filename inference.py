@@ -52,6 +52,65 @@ class GraspPredictor:
 
         self.processor = CLIPProcessor.from_pretrained(clip_model_name)
 
+    def model_info(self) -> dict:
+        """Count model parameters."""
+        total = sum(p.numel() for p in self.model.parameters())
+        trainable = sum(p.numel() for p in self.model.parameters() if p.requires_grad)
+        clip_params = sum(p.numel() for p in self.model.clip.parameters())
+        head_params = total - clip_params
+        return {
+            "total_params": total,
+            "trainable_params": trainable,
+            "clip_params": clip_params,
+            "head_params": head_params,
+            "total_M": total / 1e6,
+            "clip_M": clip_params / 1e6,
+            "head_M": head_params / 1e6,
+        }
+
+    @torch.no_grad()
+    def benchmark(self, num_runs: int = 100, warmup: int = 10) -> dict:
+        """Measure inference latency."""
+        import time
+        dummy_image = Image.fromarray(np.random.randint(0, 255, (416, 416, 3), dtype=np.uint8))
+        dummy_text = "grasp the object"
+
+        inputs = self.processor(
+            text=[dummy_text], images=[dummy_image],
+            return_tensors="pt", padding=True, truncation=True, max_length=77,
+        )
+        pixel_values = inputs["pixel_values"].to(self.device)
+        input_ids = inputs["input_ids"].to(self.device)
+        attention_mask = inputs["attention_mask"].to(self.device)
+
+        # Warmup
+        for _ in range(warmup):
+            self.model(pixel_values, input_ids, attention_mask)
+        if self.device.type == "cuda":
+            torch.cuda.synchronize()
+
+        # Benchmark
+        times = []
+        for _ in range(num_runs):
+            if self.device.type == "cuda":
+                torch.cuda.synchronize()
+            t0 = time.perf_counter()
+            self.model(pixel_values, input_ids, attention_mask)
+            if self.device.type == "cuda":
+                torch.cuda.synchronize()
+            times.append(time.perf_counter() - t0)
+
+        times_ms = [t * 1000 for t in times]
+        return {
+            "mean_ms": np.mean(times_ms),
+            "std_ms": np.std(times_ms),
+            "min_ms": np.min(times_ms),
+            "max_ms": np.max(times_ms),
+            "fps": 1000.0 / np.mean(times_ms),
+            "num_runs": num_runs,
+            "device": str(self.device),
+        }
+
     @torch.no_grad()
     def predict(self, image: Image.Image, instruction: str) -> dict:
         """
@@ -82,16 +141,15 @@ class GraspPredictor:
         attention_mask = inputs["attention_mask"].to(self.device)
 
         output = self.model(pixel_values, input_ids, attention_mask)
-        params = output["params"][0].cpu().numpy()
+        params_deg = output["params_deg"][0].cpu().numpy()
 
         return {
-            "params": params,
-            "x": float(params[0]),
-            "y": float(params[1]),
-            "w": float(params[2]),
-            "h": float(params[3]),
-            "theta_rad": float(params[4]),
-            "theta_deg": float(np.degrees(params[4])),
+            "params": params_deg,
+            "x": float(params_deg[0]),
+            "y": float(params_deg[1]),
+            "w": float(params_deg[2]),
+            "h": float(params_deg[3]),
+            "theta": float(params_deg[4]),
         }
 
     def predict_and_visualize(
@@ -137,6 +195,20 @@ def main():
     )
     print(f"Model loaded on {predictor.device}")
 
+    # Model info
+    info = predictor.model_info()
+    print(f"\nModel parameters:")
+    print(f"  Total:  {info['total_M']:.2f}M")
+    print(f"  CLIP:   {info['clip_M']:.2f}M")
+    print(f"  Head:   {info['head_M']:.2f}M")
+
+    # Benchmark
+    print(f"\nBenchmarking inference speed...")
+    bench = predictor.benchmark(num_runs=50, warmup=5)
+    print(f"  Latency: {bench['mean_ms']:.1f} ± {bench['std_ms']:.1f} ms")
+    print(f"  FPS:     {bench['fps']:.1f}")
+    print(f"  Device:  {bench['device']}")
+
     if args.image:
         # Single image inference
         print(f"\nImage: {args.image}")
@@ -150,7 +222,7 @@ def main():
         print(f"\nPrediction:")
         print(f"  Center (x, y): ({result['x']:.4f}, {result['y']:.4f})")
         print(f"  Size (w, h):   ({result['w']:.4f}, {result['h']:.4f})")
-        print(f"  Angle:         {result['theta_deg']:.2f}°")
+        print(f"  Angle:         {result['theta']:.2f}°")
         print(f"\nVisualization saved to {save_path}")
 
     elif args.image_dir:
@@ -171,7 +243,7 @@ def main():
             )
             results.append({"image": img_path.name, **result})
             print(f"  {img_path.name}: center=({result['x']:.3f}, {result['y']:.3f}), "
-                  f"size=({result['w']:.3f}, {result['h']:.3f}), angle={result['theta_deg']:.1f}°")
+                  f"size=({result['w']:.3f}, {result['h']:.3f}), angle={result['theta']:.1f}°")
 
         # Save results summary
         import json

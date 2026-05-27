@@ -51,15 +51,17 @@ def evaluate(model, dataloader, processor, device, cfg, visualize=False, num_vis
             output = model(pixel_values, input_ids, attention_mask)
             metrics.update(output["params"], labels)
 
-            # Store predictions
-            pred_np = output["params"].cpu().numpy()
-            gt_np = labels.cpu().numpy()
-            for i in range(pred_np.shape[0]):
+            # Store predictions in degrees for readability
+            pred_deg = output["params_deg"].cpu().numpy()
+            gt_deg = labels.clone()
+            gt_deg[:, 4] = gt_deg[:, 4] * (180.0 / torch.pi)
+            gt_deg_np = gt_deg.cpu().numpy()
+            for i in range(pred_deg.shape[0]):
                 all_predictions.append({
                     "sha": batch["sha"][i],
                     "instruction": batch["instruction"][i],
-                    "pred": pred_np[i].tolist(),
-                    "gt": gt_np[i].tolist(),
+                    "pred": pred_deg[i].tolist(),
+                    "gt": gt_deg_np[i].tolist(),
                 })
 
             # Visualize
@@ -126,6 +128,12 @@ def main():
     load_checkpoint(args.checkpoint, model, device=device)
     processor = CLIPProcessor.from_pretrained(cfg["model"]["clip_model"])
 
+    # Model info
+    total_params = sum(p.numel() for p in model.parameters())
+    clip_params = sum(p.numel() for p in model.clip.parameters())
+    head_params = total_params - clip_params
+    print(f"  Parameters: {total_params/1e6:.2f}M total, {clip_params/1e6:.2f}M CLIP, {head_params/1e6:.2f}M head")
+
     # Evaluate
     print("\nRunning evaluation...")
     results, predictions = evaluate(
@@ -148,6 +156,31 @@ def main():
     print(f"  Mean XY Error:  {results['mean_xy_error']:.4f}")
     print(f"  Mean WH Error:  {results['mean_wh_error']:.4f}")
     print(f"  Total Samples:  {results['total_samples']}")
+
+    # Inference speed benchmark
+    import time
+    import numpy as np
+    model.eval()
+    dummy_image = torch.randn(1, 3, 224, 224).to(device)
+    dummy_ids = torch.randint(0, 1000, (1, 20)).to(device)
+    dummy_mask = torch.ones(1, 20).to(device)
+    with torch.no_grad():
+        for _ in range(10):
+            model(dummy_image, dummy_ids, dummy_mask)
+        if device.type == "cuda":
+            torch.cuda.synchronize()
+        times = []
+        for _ in range(50):
+            if device.type == "cuda":
+                torch.cuda.synchronize()
+            t0 = time.perf_counter()
+            model(dummy_image, dummy_ids, dummy_mask)
+            if device.type == "cuda":
+                torch.cuda.synchronize()
+            times.append((time.perf_counter() - t0) * 1000)
+    print(f"\n  Inference speed:")
+    print(f"    Latency: {np.mean(times):.1f} ± {np.std(times):.1f} ms")
+    print(f"    FPS:     {1000.0 / np.mean(times):.1f}")
     print(f"{'='*60}")
 
     # Save results
