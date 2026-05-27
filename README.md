@@ -97,6 +97,26 @@ Evaluate on test set (final results):
 python eval.py --checkpoint checkpoints/best.pt --split test --visualize
 ```
 
+## Visualization
+
+Generate a batch grid image showing predictions (red) vs ground truth (green) with instructions:
+
+```bash
+# Val set, 16 samples in a 4-column grid
+python visualize.py --checkpoint checkpoints/best.pt --split val --num_samples 16 --cols 4
+
+# Test set, 32 samples
+python visualize.py --checkpoint checkpoints/best.pt --split test --num_samples 32 --cols 8
+
+# Custom image folder
+python visualize.py --checkpoint checkpoints/best.pt --image_dir ./my_images \
+                    --instruction "grasp the handle" --num_samples 8
+
+# Custom output path and cell size
+python visualize.py --checkpoint checkpoints/best.pt --split val \
+                    --output outputs/my_vis.jpg --cell_size 512
+```
+
 ## Inference
 
 Single image:
