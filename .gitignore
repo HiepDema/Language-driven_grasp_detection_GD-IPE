@@ -1,0 +1,42 @@
+# Data
+data/
+*.zip
+*.pt
+!models/*.py
+
+# Checkpoints
+checkpoints/
+*.pt
+
+# Outputs
+outputs/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# Environment
+.env
+.venv/
+venv/
+env/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Weights & Biases
+wandb/
+
+# HuggingFace cache
+.cache/
