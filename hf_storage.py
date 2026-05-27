@@ -27,41 +27,22 @@ from huggingface_hub import HfApi, hf_hub_download, snapshot_download, create_re
 
 
 def upload_data(repo_id: str, data_dir: str = "./data"):
-    """Upload processed data (no raw zips) to HF Hub."""
+    """Upload processed data (no raw zips) to HF Hub using large folder upload."""
     api = HfApi()
     data_path = Path(data_dir)
 
     # Create repo if not exists
     create_repo(repo_id, repo_type="dataset", exist_ok=True, private=True)
     print(f"Uploading data to {repo_id}...")
+    print(f"  Using upload_large_folder for reliable upload of many files...")
 
-    # Upload matched_shas.txt and selected_shas.txt
-    for txt_file in ["matched_shas.txt", "selected_shas.txt"]:
-        filepath = data_path / txt_file
-        if filepath.exists():
-            api.upload_file(
-                path_or_fileobj=str(filepath),
-                path_in_repo=txt_file,
-                repo_id=repo_id,
-                repo_type="dataset",
-            )
-            print(f"  Uploaded {txt_file}")
-
-    # Upload folders
-    folders = ["grasp_instructions", "grasp_label_positive", "images"]
-    for folder in folders:
-        folder_path = data_path / folder
-        if not folder_path.exists():
-            print(f"  [SKIP] {folder} not found")
-            continue
-        print(f"  Uploading {folder}/... (this may take a while)")
-        api.upload_folder(
-            folder_path=str(folder_path),
-            path_in_repo=folder,
-            repo_id=repo_id,
-            repo_type="dataset",
-        )
-        print(f"  Done: {folder}/")
+    # Upload entire data dir, ignoring raw/ folder
+    api.upload_large_folder(
+        folder_path=str(data_path),
+        repo_id=repo_id,
+        repo_type="dataset",
+        ignore_patterns=["raw/*", "raw/**"],
+    )
 
     print(f"\nData uploaded to: https://huggingface.co/datasets/{repo_id}")
 
@@ -89,12 +70,12 @@ def upload_checkpoints(repo_id: str, checkpoint_dir: str = "./checkpoints"):
     create_repo(repo_id, repo_type="model", exist_ok=True, private=True)
     print(f"Uploading checkpoints to {repo_id}...")
 
-    api.upload_folder(
+    api.upload_large_folder(
         folder_path=str(ckpt_path),
         repo_id=repo_id,
         repo_type="model",
     )
-    print(f"Checkpoints uploaded to: https://huggingface.co/models/{repo_id}")
+    print(f"Checkpoints uploaded to: https://huggingface.co/{repo_id}")
 
 
 def download_checkpoints(repo_id: str, checkpoint_dir: str = "./checkpoints"):
