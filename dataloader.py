@@ -11,7 +11,7 @@ All matched by SHA-256 filename.
 Usage:
     from dataloader import get_grasp_dataloader
 
-    train_loader, val_loader = get_grasp_dataloader(
+    train_loader, val_loader, test_loader = get_grasp_dataloader(
         data_dir="./data",
         batch_size=16,
         val_split=0.1,
@@ -207,26 +207,30 @@ def grasp_collate_fn(batch):
 def get_grasp_dataloader(
     data_dir: str = "./data",
     batch_size: int = 16,
-    val_split: float = 0.1,
+    val_split: float = 0.15,
+    test_split: float = 0.15,
     num_workers: int = 4,
     load_images: bool = True,
     transform=None,
     seed: int = 42,
 ):
     """
-    Create train and validation DataLoaders for Grasp-Anything dataset.
+    Create train, validation, and test DataLoaders for Grasp-Anything dataset.
+
+    Split ratio (default): 70% train, 15% val, 15% test.
 
     Args:
         data_dir: Path to the processed data directory.
         batch_size: Batch size for training.
         val_split: Fraction of data for validation.
+        test_split: Fraction of data for testing.
         num_workers: Number of dataloader workers.
         load_images: Whether to load images.
         transform: Custom transform for images.
         seed: Random seed for reproducible split.
 
     Returns:
-        (train_loader, val_loader) tuple of DataLoaders.
+        (train_loader, val_loader, test_loader) tuple of DataLoaders.
     """
     dataset = GraspAnythingDataset(
         data_dir=data_dir,
@@ -235,11 +239,14 @@ def get_grasp_dataloader(
     )
 
     total = len(dataset)
+    test_size = int(total * test_split)
     val_size = int(total * val_split)
-    train_size = total - val_size
+    train_size = total - val_size - test_size
 
     generator = torch.Generator().manual_seed(seed)
-    train_dataset, val_dataset = random_split(dataset, [train_size, val_size], generator=generator)
+    train_dataset, val_dataset, test_dataset = random_split(
+        dataset, [train_size, val_size, test_size], generator=generator
+    )
 
     train_loader = DataLoader(
         train_dataset,
@@ -260,15 +267,25 @@ def get_grasp_dataloader(
         pin_memory=True,
     )
 
-    print(f"Train: {train_size} samples, {len(train_loader)} batches")
-    print(f"Val: {val_size} samples, {len(val_loader)} batches")
+    test_loader = DataLoader(
+        test_dataset,
+        batch_size=batch_size,
+        shuffle=False,
+        num_workers=num_workers,
+        collate_fn=grasp_collate_fn,
+        pin_memory=True,
+    )
 
-    return train_loader, val_loader
+    print(f"Train: {train_size} samples, {len(train_loader)} batches")
+    print(f"Val:   {val_size} samples, {len(val_loader)} batches")
+    print(f"Test:  {test_size} samples, {len(test_loader)} batches")
+
+    return train_loader, val_loader, test_loader
 
 
 if __name__ == "__main__":
     # Quick test
-    train_loader, val_loader = get_grasp_dataloader(
+    train_loader, val_loader, test_loader = get_grasp_dataloader(
         data_dir="./data",
         batch_size=8,
         num_workers=0,

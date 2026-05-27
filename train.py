@@ -78,6 +78,10 @@ def train_one_epoch(model, train_loader, optimizer, criterion, processor, device
     total_wh = 0.0
     total_angle = 0.0
     num_batches = 0
+    metrics = GraspMetrics(
+        iou_threshold=cfg["eval"]["iou_threshold"],
+        angle_threshold=cfg["eval"]["angle_threshold"],
+    )
 
     for batch_idx, batch in enumerate(train_loader):
         pixel_values, input_ids, attention_mask, labels = prepare_batch(
@@ -110,16 +114,20 @@ def train_one_epoch(model, train_loader, optimizer, criterion, processor, device
         total_angle += losses["angle_loss"].item()
         num_batches += 1
 
+        metrics.update(output["params"].detach(), labels)
+
         if (batch_idx + 1) % 50 == 0:
             avg = total_loss / num_batches
             print(f"    Step [{batch_idx+1}/{len(train_loader)}] loss={avg:.4f}")
 
-    return {
+    train_metrics = metrics.compute()
+    train_metrics.update({
         "loss": total_loss / max(num_batches, 1),
         "xy_loss": total_xy / max(num_batches, 1),
         "wh_loss": total_wh / max(num_batches, 1),
         "angle_loss": total_angle / max(num_batches, 1),
-    }
+    })
+    return train_metrics
 
 
 @torch.no_grad()
@@ -178,10 +186,11 @@ def main():
 
     # Data
     print("\nLoading data...")
-    train_loader, val_loader = get_grasp_dataloader(
+    train_loader, val_loader, test_loader = get_grasp_dataloader(
         data_dir=cfg["data"]["data_dir"],
         batch_size=cfg["training"]["batch_size"],
         val_split=cfg["training"]["val_split"],
+        test_split=cfg["training"].get("test_split", 0.1),
         num_workers=cfg["training"]["num_workers"],
         load_images=cfg["data"]["load_images"],
         seed=cfg["training"]["seed"],
@@ -270,27 +279,58 @@ def main():
 
         # Print epoch summary
         print(f"Epoch [{epoch+1}/{num_epochs}] ({epoch_time:.1f}s)")
-        print(f"  Train Loss: {train_metrics['loss']:.4f} "
+        print(f"  [Train] Loss: {train_metrics['loss']:.4f} "
               f"(xy={train_metrics['xy_loss']:.4f}, wh={train_metrics['wh_loss']:.4f}, "
               f"angle={train_metrics['angle_loss']:.4f})")
-        print(f"  Val Loss: {val_metrics['val_loss']:.4f}")
-        print(f"  Accuracy: {val_metrics.get('accuracy', 0):.4f} "
+        print(f"  [Train] Accuracy: {train_metrics.get('accuracy', 0):.4f} "
+              f"(IoU: {train_metrics.get('iou_accuracy', 0):.4f}, "
+              f"Angle: {train_metrics.get('angle_accuracy', 0):.4f})")
+        print(f"  [Train] Mean IoU: {train_metrics.get('mean_iou', 0):.4f}, "
+              f"Mean Angle Diff: {train_metrics.get('mean_angle_diff', 0):.2f}°")
+        print(f"  [Val]   Loss: {val_metrics['val_loss']:.4f}")
+        print(f"  [Val]   Accuracy: {val_metrics.get('accuracy', 0):.4f} "
               f"(IoU: {val_metrics.get('iou_accuracy', 0):.4f}, "
               f"Angle: {val_metrics.get('angle_accuracy', 0):.4f})")
-        print(f"  Mean IoU: {val_metrics.get('mean_iou', 0):.4f}, "
+        print(f"  [Val]   Mean IoU: {val_metrics.get('mean_iou', 0):.4f}, "
               f"Mean Angle Diff: {val_metrics.get('mean_angle_diff', 0):.2f}°")
 
-        # Save checkpoint
-        if (epoch + 1) % cfg["checkpoint"]["save_every"] == 0 or epoch == num_epochs - 1:
-            ckpt_manager.save(model, optimizer, scheduler, epoch, val_metrics, scaler)
-            print(f"  Checkpoint saved (best acc: {ckpt_manager.best_metric:.4f})")
+        # Save periodic checkpoint every N epochs
+        if (epoch + 1) % cfg["checkpoint"]["save_every"] == 0:
+            periodic_path = os.path.join(cfg["checkpoint"]["save_dir"], f"epoch_{epoch+1:03d}.pt")
+            from utils.checkpoint import save_checkpoint as _save_ckpt
+            _save_ckpt(model, optimizer, scheduler, epoch, val_metrics, periodic_path, scaler)
+            print(f"  Periodic checkpoint saved: {periodic_path}")
+
+        # Save best checkpoint + run test if val accuracy improves
+        current_acc = val_metrics.get("accuracy", 0.0)
+        ckpt_manager.save(model, optimizer, scheduler, epoch, val_metrics, scaler)
+
+        if current_acc >= ckpt_manager.best_metric:
+            print(f"  New best val accuracy: {current_acc:.4f} — running test...")
+            test_metrics = validate(model, test_loader, criterion, processor, device, cfg)
+            print(f"  Test Accuracy: {test_metrics.get('accuracy', 0):.4f} "
+                  f"(IoU: {test_metrics.get('iou_accuracy', 0):.4f}, "
+                  f"Angle: {test_metrics.get('angle_accuracy', 0):.4f})")
+            print(f"  Test Mean IoU: {test_metrics.get('mean_iou', 0):.4f}, "
+                  f"Mean Angle Diff: {test_metrics.get('mean_angle_diff', 0):.2f}°")
 
         print()
 
+    # Final test with best checkpoint
     print(f"{'='*60}")
-    print(f"Training complete! Best accuracy: {ckpt_manager.best_metric:.4f}")
+    print(f"Training complete! Loading best checkpoint for final test...")
+    print(f"{'='*60}")
+    if ckpt_manager.best_checkpoint and os.path.exists(ckpt_manager.best_checkpoint):
+        load_checkpoint(ckpt_manager.best_checkpoint, model, device=device)
+        test_metrics = validate(model, test_loader, criterion, processor, device, cfg)
+        print(f"\nFinal Test Results (best val checkpoint):")
+        print(f"  Accuracy:       {test_metrics.get('accuracy', 0):.4f}")
+        print(f"  IoU Accuracy:   {test_metrics.get('iou_accuracy', 0):.4f}")
+        print(f"  Angle Accuracy: {test_metrics.get('angle_accuracy', 0):.4f}")
+        print(f"  Mean IoU:       {test_metrics.get('mean_iou', 0):.4f}")
+        print(f"  Mean Angle Diff: {test_metrics.get('mean_angle_diff', 0):.2f}°")
+    print(f"\nBest val accuracy: {ckpt_manager.best_metric:.4f}")
     print(f"Best checkpoint: {ckpt_manager.best_checkpoint}")
-    print(f"{'='*60}")
 
 
 if __name__ == "__main__":

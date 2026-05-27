@@ -60,7 +60,7 @@ if __name__ == "__main__":
         print("TESTING DATALOADER")
         print("=" * 60)
         try:
-            train_loader, val_loader = get_grasp_dataloader(
+            train_loader, val_loader, test_loader = get_grasp_dataloader(
                 data_dir=args.data_dir,
                 batch_size=4,
                 num_workers=0,

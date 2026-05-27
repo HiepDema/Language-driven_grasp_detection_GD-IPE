@@ -98,7 +98,7 @@ def main():
     parser.add_argument("--visualize", action="store_true")
     parser.add_argument("--num_vis", type=int, default=20)
     parser.add_argument("--output_dir", type=str, default="outputs")
-    parser.add_argument("--split", type=str, default="val", choices=["val", "all"])
+    parser.add_argument("--split", type=str, default="val", choices=["val", "test", "train"])
     args = parser.parse_args()
 
     cfg = yaml.safe_load(open(args.config))
@@ -107,15 +107,17 @@ def main():
 
     # Load data
     print("\nLoading data...")
-    train_loader, val_loader = get_grasp_dataloader(
+    train_loader, val_loader, test_loader = get_grasp_dataloader(
         data_dir=cfg["data"]["data_dir"],
         batch_size=cfg["training"]["batch_size"],
         val_split=cfg["training"]["val_split"],
+        test_split=cfg["training"].get("test_split", 0.1),
         num_workers=cfg["training"]["num_workers"],
         load_images=cfg["data"]["load_images"],
         seed=cfg["training"]["seed"],
     )
-    eval_loader = val_loader if args.split == "val" else train_loader
+    split_map = {"val": val_loader, "test": test_loader, "train": train_loader}
+    eval_loader = split_map[args.split]
 
     # Load model
     print(f"\nLoading model from {args.checkpoint}...")

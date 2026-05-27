@@ -263,7 +263,7 @@ def test_data_pipeline():
         return True
 
     from dataloader import get_grasp_dataloader
-    train_loader, val_loader = get_grasp_dataloader(
+    train_loader, val_loader, test_loader = get_grasp_dataloader(
         data_dir="./data",
         batch_size=4,
         num_workers=0,
