@@ -1,4 +1,3 @@
-from models.grasp_model import GraspCLIPModel
-from models.grasp_head import GraspHead
+from models.grasp_detection import GraspDetectionModel
 
-__all__ = ["GraspCLIPModel", "GraspHead"]
+__all__ = ["GraspDetectionModel"]

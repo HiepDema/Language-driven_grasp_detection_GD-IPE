@@ -1,7 +1,5 @@
 """
-Evaluation script for GraspCLIP model.
-
-Evaluates a trained model on the validation set and reports metrics.
+Evaluation script for GraspDetection model.
 
 Usage:
     python eval.py --checkpoint checkpoints/best_epoch050_0.8500.pt
@@ -10,26 +8,26 @@ Usage:
 
 import argparse
 import math
-import os
 import json
 from pathlib import Path
 
 import yaml
 import torch
+import numpy as np
 from torch.cuda.amp import autocast
-from transformers import CLIPProcessor
+from transformers import BertTokenizer
 from tqdm import tqdm
 
 from dataloader import get_grasp_dataloader
-from models.grasp_model import GraspCLIPModel
-from utils.metrics import GraspMetrics
+from models.grasp_detection import GraspDetectionModel
+from utils.metrics import GraspMetrics, pred_to_params
 from utils.checkpoint import load_checkpoint
 from utils.label_parser import parse_grasp_label
 from utils.visualization import visualize_prediction
 from train import prepare_batch
 
 
-def evaluate(model, dataloader, processor, device, cfg, visualize=False, num_vis=10, output_dir="outputs"):
+def evaluate(model, dataloader, tokenizer, device, cfg, visualize=False, num_vis=10, output_dir="outputs"):
     model.eval()
     metrics = GraspMetrics(
         iou_threshold=cfg["eval"]["iou_threshold"],
@@ -45,29 +43,29 @@ def evaluate(model, dataloader, processor, device, cfg, visualize=False, num_vis
 
     with torch.no_grad():
         for batch_idx, batch in enumerate(tqdm(dataloader, desc="Evaluating")):
-            pixel_values, input_ids, attention_mask, labels = prepare_batch(
-                batch, processor, device, cfg["model"]["image_size"]
+            images, input_ids, attention_mask, labels = prepare_batch(
+                batch, tokenizer, device, cfg
             )
 
-            output = model(pixel_values, input_ids, attention_mask)
-            metrics.update(output["params"], labels)
+            output = model(images, input_ids, attention_mask)
+            metrics.update(output, labels)
 
-            # Store predictions in degrees for readability
-            pred_deg = output["params_deg"].cpu().numpy()
-            for i in range(pred_deg.shape[0]):
+            params = pred_to_params(output).cpu().numpy()
+            params_deg = params.copy()
+            params_deg[:, 4] = np.degrees(params_deg[:, 4])
+
+            for i in range(params.shape[0]):
                 gt_i = labels[i].cpu().clone()
                 gt_i[:, 4] = gt_i[:, 4] * (180.0 / math.pi)
                 all_predictions.append({
                     "sha": batch["sha"][i],
                     "instruction": batch["instruction"][i],
-                    "pred": pred_deg[i].tolist(),
+                    "pred": params_deg[i].tolist(),
                     "gt": gt_i.numpy().tolist(),
                 })
 
-            # Visualize
             if visualize and vis_count < num_vis:
-                import numpy as np
-                for i in range(min(pixel_values.shape[0], num_vis - vis_count)):
+                for i in range(min(images.shape[0], num_vis - vis_count)):
                     img_tensor = batch["image"][i]
                     mean = torch.tensor([0.485, 0.456, 0.406]).view(3, 1, 1)
                     std = torch.tensor([0.229, 0.224, 0.225]).view(3, 1, 1)
@@ -75,13 +73,12 @@ def evaluate(model, dataloader, processor, device, cfg, visualize=False, num_vis
                     img_np = (img.permute(1, 2, 0).numpy() * 255).astype(np.uint8)
                     img_bgr = img_np[:, :, ::-1].copy()
 
-                    pred_p = tuple(pred_deg[i])
-                    # Use first GT grasp for visualization
+                    pred_p = tuple(params_deg[i])
                     gt_first = labels[i][0].cpu().numpy()
                     gt_first[4] = math.degrees(gt_first[4])
                     gt_p = tuple(gt_first)
 
-                    vis = visualize_prediction(
+                    visualize_prediction(
                         img_bgr,
                         pred_params=pred_p,
                         gt_params=gt_p,
@@ -95,7 +92,7 @@ def evaluate(model, dataloader, processor, device, cfg, visualize=False, num_vis
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Evaluate GraspCLIP model")
+    parser = argparse.ArgumentParser(description="Evaluate GraspDetection model")
     parser.add_argument("--checkpoint", type=str, required=True)
     parser.add_argument("--config", type=str, default="configs/default.yaml")
     parser.add_argument("--visualize", action="store_true")
@@ -108,7 +105,6 @@ def main():
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Device: {device}")
 
-    # Load data
     print("\nLoading data...")
     train_loader, val_loader, test_loader = get_grasp_dataloader(
         data_dir=cfg["data"]["data_dir"],
@@ -122,53 +118,45 @@ def main():
     split_map = {"val": val_loader, "test": test_loader, "train": train_loader}
     eval_loader = split_map[args.split]
 
-    # Load model
+    print("\nLoading tokenizer...")
+    tokenizer = BertTokenizer.from_pretrained(cfg["model"]["bert_model"])
+
     print(f"\nLoading model from {args.checkpoint}...")
-    model = GraspCLIPModel(
-        clip_model_name=cfg["model"]["clip_model"],
-        grasp_head_hidden=cfg["model"]["grasp_head_hidden"],
-        dropout=cfg["model"]["dropout"],
-    ).to(device)
-
+    model = GraspDetectionModel(d_model=cfg["model"]["d_model"]).to(device)
     load_checkpoint(args.checkpoint, model, device=device)
-    processor = CLIPProcessor.from_pretrained(cfg["model"]["clip_model"])
 
-    # Model info
     total_params = sum(p.numel() for p in model.parameters())
-    clip_params = sum(p.numel() for p in model.clip.parameters())
-    head_params = total_params - clip_params
-    print(f"  Parameters: {total_params/1e6:.2f}M total, {clip_params/1e6:.2f}M CLIP, {head_params/1e6:.2f}M head")
+    trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    print(f"  Total parameters: {total_params:,}")
+    print(f"  Trainable parameters: {trainable_params:,}")
 
-    # Evaluate
     print("\nRunning evaluation...")
     results, predictions = evaluate(
-        model, eval_loader, processor, device, cfg,
+        model, eval_loader, tokenizer, device, cfg,
         visualize=args.visualize,
         num_vis=args.num_vis,
         output_dir=args.output_dir,
     )
 
-    # Print results
     print(f"\n{'='*60}")
     print("EVALUATION RESULTS")
     print(f"{'='*60}")
-    print(f"  Grasp Accuracy (IoU>{cfg['eval']['iou_threshold']} & Angle<{cfg['eval']['angle_threshold']}°): "
+    print(f"  Grasp Accuracy (IoU>{cfg['eval']['iou_threshold']} & Angle<{cfg['eval']['angle_threshold']}deg): "
           f"{results['accuracy']:.4f}")
     print(f"  IoU Accuracy:   {results['iou_accuracy']:.4f}")
     print(f"  Angle Accuracy: {results['angle_accuracy']:.4f}")
     print(f"  Mean IoU:       {results['mean_iou']:.4f}")
-    print(f"  Mean Angle Diff: {results['mean_angle_diff']:.2f}°")
+    print(f"  Mean Angle Diff: {results['mean_angle_diff']:.2f}deg")
     print(f"  Mean XY Error:  {results['mean_xy_error']:.4f}")
     print(f"  Mean WH Error:  {results['mean_wh_error']:.4f}")
     print(f"  Total Samples:  {results['total_samples']}")
 
     # Inference speed benchmark
     import time
-    import numpy as np
     model.eval()
-    dummy_image = torch.randn(1, 3, 224, 224).to(device)
-    dummy_ids = torch.randint(0, 1000, (1, 20)).to(device)
-    dummy_mask = torch.ones(1, 20).to(device)
+    dummy_image = torch.randn(1, 3, 416, 416).to(device)
+    dummy_ids = torch.randint(0, 1000, (1, 128)).to(device)
+    dummy_mask = torch.ones(1, 128, dtype=torch.long).to(device)
     with torch.no_grad():
         for _ in range(10):
             model(dummy_image, dummy_ids, dummy_mask)
@@ -184,11 +172,10 @@ def main():
                 torch.cuda.synchronize()
             times.append((time.perf_counter() - t0) * 1000)
     print(f"\n  Inference speed:")
-    print(f"    Latency: {np.mean(times):.1f} ± {np.std(times):.1f} ms")
+    print(f"    Latency: {np.mean(times):.1f} +/- {np.std(times):.1f} ms")
     print(f"    FPS:     {1000.0 / np.mean(times):.1f}")
     print(f"{'='*60}")
 
-    # Save results
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 

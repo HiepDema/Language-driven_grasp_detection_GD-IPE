@@ -28,21 +28,9 @@ def grasp_rect_vertices(x, y, w, h, theta):
     return corners
 
 
-def polygon_area(vertices):
-    """Shoelace formula for polygon area."""
-    n = len(vertices)
-    area = 0.0
-    for i in range(n):
-        j = (i + 1) % n
-        area += vertices[i][0] * vertices[j][1]
-        area -= vertices[j][0] * vertices[i][1]
-    return abs(area) / 2.0
-
-
 def compute_grasp_iou(pred_params, gt_params, image_size: int = 416) -> float:
     """
     Approximate IoU between predicted and ground truth grasp rectangles.
-    Uses axis-aligned bounding box approximation for speed.
 
     Args:
         pred_params: (x, y, w, h, theta) - normalized [0,1] for x,y,w,h; radians for theta
@@ -55,11 +43,9 @@ def compute_grasp_iou(pred_params, gt_params, image_size: int = 416) -> float:
     px, py, pw, ph, pt = [float(v) for v in pred_params]
     gx, gy, gw, gh, gt_angle = [float(v) for v in gt_params]
 
-    # Denormalize
     px, py, pw, ph = px * image_size, py * image_size, pw * image_size, ph * image_size
     gx, gy, gw, gh = gx * image_size, gy * image_size, gw * image_size, gh * image_size
 
-    # Approximate with axis-aligned bounding boxes of the rotated rectangles
     def aabb(cx, cy, w, h, theta):
         cos_t = abs(math.cos(theta))
         sin_t = abs(math.sin(theta))
@@ -70,7 +56,6 @@ def compute_grasp_iou(pred_params, gt_params, image_size: int = 416) -> float:
     pred_box = aabb(px, py, pw, ph, pt)
     gt_box = aabb(gx, gy, gw, gh, gt_angle)
 
-    # Intersection
     x1 = max(pred_box[0], gt_box[0])
     y1 = max(pred_box[1], gt_box[1])
     x2 = min(pred_box[2], gt_box[2])
@@ -85,6 +70,23 @@ def compute_grasp_iou(pred_params, gt_params, image_size: int = 416) -> float:
     union = pred_area + gt_area - intersection
 
     return intersection / max(union, 1e-6)
+
+
+def pred_to_params(pred: dict) -> torch.Tensor:
+    """
+    Convert model output dict to [B, 5] params tensor (x, y, w, h, theta).
+    sin_theta_half in [0,1] -> theta in [0, pi] -> shift to [-pi/2, pi/2].
+    """
+    center = pred["center"]
+    size = pred["size"]
+    sin_theta_half = pred["sin_theta_half"]
+
+    # sin(theta/2) -> theta/2 -> theta (in [0, pi])
+    theta_shifted = 2 * torch.asin(sin_theta_half.clamp(-1 + 1e-6, 1 - 1e-6))
+    # Shift back to [-pi/2, pi/2]
+    theta = theta_shifted - math.pi / 2
+
+    return torch.cat([center, size, theta], dim=-1)
 
 
 class GraspMetrics:
@@ -105,25 +107,22 @@ class GraspMetrics:
         self.xy_error_sum = 0.0
         self.wh_error_sum = 0.0
 
-    def update(self, pred_params: torch.Tensor, gt_params_list: list):
+    def update(self, pred: dict, gt_params_list: list):
         """
-        Update metrics with a batch (multi-grasp GT support).
-
-        A prediction is correct if it matches ANY of the GT grasps.
+        Update metrics with a batch.
 
         Args:
-            pred_params: [B, 5] predicted (x, y, w, h, theta)
-            gt_params_list: list of [N_i, 5] tensors, one per sample.
-                            Each has N_i GT grasps.
+            pred: model output dict with "center", "size", "sin_theta_half"
+            gt_params_list: list of [N_i, 5] tensors
         """
+        pred_params = pred_to_params(pred)
         pred_np = pred_params.detach().cpu().numpy()
         batch_size = pred_np.shape[0]
 
         for i in range(batch_size):
-            pred = pred_np[i]
-            gt_all = gt_params_list[i].detach().cpu().numpy()  # [N_i, 5]
+            pred_i = pred_np[i]
+            gt_all = gt_params_list[i].detach().cpu().numpy()
 
-            # Find best matching GT (highest IoU)
             best_iou = 0.0
             best_angle_diff = 180.0
             best_xy_err = float("inf")
@@ -131,12 +130,12 @@ class GraspMetrics:
 
             for j in range(gt_all.shape[0]):
                 gt = gt_all[j]
-                iou = compute_grasp_iou(pred, gt)
+                iou = compute_grasp_iou(pred_i, gt)
                 angle_diff = compute_angle_diff(
-                    math.degrees(pred[4]), math.degrees(gt[4])
+                    math.degrees(pred_i[4]), math.degrees(gt[4])
                 )
-                xy_err = np.sqrt((pred[0] - gt[0]) ** 2 + (pred[1] - gt[1]) ** 2)
-                wh_err = np.sqrt((pred[2] - gt[2]) ** 2 + (pred[3] - gt[3]) ** 2)
+                xy_err = np.sqrt((pred_i[0] - gt[0]) ** 2 + (pred_i[1] - gt[1]) ** 2)
+                wh_err = np.sqrt((pred_i[2] - gt[2]) ** 2 + (pred_i[3] - gt[3]) ** 2)
 
                 if iou > best_iou:
                     best_iou = iou

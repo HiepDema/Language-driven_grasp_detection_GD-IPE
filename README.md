@@ -1,6 +1,6 @@
 # Grasp-Anything: Language-Driven Grasp Pose Prediction
 
-CLIP-based model for predicting 5-DoF grasp rectangles from RGB images and natural language instructions.
+Multi-modal model for predicting 5-DoF grasp rectangles from RGB images and natural language instructions.
 
 **Task:** Given an image and a grasping prompt (e.g., "grasp the blue bottle"), predict a rectangle grasp pose `{x, y, w, h, θ}` where:
 - `(x, y)` — center point of the grasp rectangle (normalized [0, 1])
@@ -13,11 +13,15 @@ CLIP-based model for predicting 5-DoF grasp rectangles from RGB images and natur
 grasp_anything/
 ├── configs/
 │   ├── default.yaml          # Full training configuration
-│   └── quick_test.yaml       # Quick test (3 epochs, frozen CLIP)
+│   └── quick_test.yaml       # Quick test (3 epochs)
 ├── models/
 │   ├── __init__.py
-│   ├── grasp_model.py        # GraspCLIP model (CLIP backbone + fusion + head)
-│   └── grasp_head.py         # Grasp prediction head (MLP → x, y, w, h, θ)
+│   ├── cnn.py                # CNN backbone (lightweight, depthwise separable)
+│   ├── vit.py                # ViT backbone (patch-based transformer)
+│   ├── nlp.py                # Text encoder (frozen BERT embeddings + attention pooling)
+│   ├── grasp_detection.py    # Full grasp detection model (CNN + ViT + NLP + heads)
+│   ├── grasp_model.py        # (legacy) CLIP-based model
+│   └── grasp_head.py         # (legacy) Grasp prediction head
 ├── utils/
 │   ├── __init__.py
 │   ├── losses.py             # Multi-grasp loss (min-over-targets)
@@ -29,7 +33,8 @@ grasp_anything/
 ├── dataloader.py             # PyTorch Dataset & DataLoader (70/15/15 split)
 ├── train.py                  # Training with val + test evaluation
 ├── eval.py                   # Evaluation with metrics & visualization
-├── inference.py              # Inference + model info + speed benchmark
+├── inference.py              # Inference + speed benchmark
+├── visualize.py              # Batch grid visualization
 ├── test.py                   # Unit tests & sanity checks
 ├── requirements.txt
 └── README.md
@@ -102,19 +107,9 @@ python eval.py --checkpoint checkpoints/best.pt --split test --visualize
 Generate a batch grid image showing predictions (red) vs ground truth (green) with instructions:
 
 ```bash
-# Val set, 16 samples in a 4-column grid
 python visualize.py --checkpoint checkpoints/best.pt --split val --num_samples 16 --cols 4
-
-# Test set, 32 samples
-python visualize.py --checkpoint checkpoints/best.pt --split test --num_samples 32 --cols 8
-
-# Custom image folder
 python visualize.py --checkpoint checkpoints/best.pt --image_dir ./my_images \
                     --instruction "grasp the handle" --num_samples 8
-
-# Custom output path and cell size
-python visualize.py --checkpoint checkpoints/best.pt --split val \
-                    --output outputs/my_vis.jpg --cell_size 512
 ```
 
 ## Inference
@@ -134,8 +129,6 @@ python inference.py --checkpoint checkpoints/best.pt \
                     --output_dir outputs/inference/
 ```
 
-Inference also reports model parameter count and latency benchmark (FPS).
-
 ## Tests
 
 ```bash
@@ -146,57 +139,84 @@ python test.py --test model # Test model forward pass only
 ## Model Architecture
 
 ```
-Image ──→ [CLIP ViT-B/16] ──→ 512d ─┐
-                                     ├──→ [Concat + Fusion MLP] ──→ [Grasp Head] ──→ (x, y, w, h, θ)
-Text  ──→ [CLIP Text Enc] ──→ 512d ─┘
+Image (3x416x416) ──┬── CNN Backbone ──► A (d_model) ──┐
+                    │                                   │ Cross Attention(A, C)
+                    └── ViT Backbone ──► B (d_model)    │         │
+                                              │         │         ▼
+Text ──► BERT Embeddings ──┬── C (seq, 768) ──┘   E (d_model) ──► MLP ──► center (x, y)
+         + Pos Encoding    │                            │
+                           └── D (d_model)              │
+                                     │                  │
+                         B ──► MLP ──┤                  │
+                                     + ──► F (d_model)  │
+                         D ──► MLP ──┘        │         │
+                                              ▼         │
+                              F ──► MLP ──► sin(θ/2)    │
+                                                        │
+                                   [E, F] ──► MLP ──► size (w, h)
 ```
 
-- **Backbone:** CLIP ViT-B/16 (pretrained, optionally frozen for first N epochs)
-- **Fusion:** Concatenation [1024d] + linear projection [512d]
-- **Head:** MLP predicting position (sigmoid), size (sigmoid), and angle (atan2 of sin/cos → degrees)
-- **Loss:** Min-over-targets strategy — for each prediction, compute loss against all GT grasps and backprop only the minimum (best-matching GT)
-- **Metrics:** Prediction is correct if it matches ANY GT grasp (IoU ≥ 0.25 AND angle diff ≤ 30°)
+### Components
+
+- **CNN Backbone** (`cnn.py`): Lightweight depthwise separable CNN with learnable positional encoding. ~410K params.
+- **ViT Backbone** (`vit.py`): Vision Transformer with 169 patches (32x32), 4 layers, embed_dim=256. ~3.1M params.
+- **Text Encoder** (`nlp.py`): Frozen BERT word embeddings + learnable positional encoding + attention pooling. ~1.1M trainable params.
+- **Grasp Detection** (`grasp_detection.py`): Combines all backbones with cross-attention and prediction heads.
+
+### Predictions
+
+- `center (x, y)`: sigmoid → [0, 1]
+- `size (w, h)`: sigmoid → [0, 1]
+- `sin(θ/2)`: sigmoid → [0, 1] (θ in [0, 180deg])
+
+### Loss Strategy
+
+Min-over-targets: for each prediction, compute loss against all GT grasps and backprop only the minimum (best-matching GT).
+
+### Evaluation Criteria
+
+Prediction is correct if it matches ANY GT grasp: IoU >= 0.25 AND angle diff <= 30deg.
 
 ## Multi-Grasp Handling
 
-Each sample may have multiple valid grasp poses (e.g., 4 rectangles). The pipeline handles this properly:
+Each sample may have multiple valid grasp poses. The pipeline handles this properly:
 
-- **Training loss:** computes loss against each GT grasp, takes the minimum → model isn't penalized for picking any valid grasp
+- **Training loss:** computes loss against each GT grasp, takes the minimum
 - **Evaluation:** prediction is successful if it matches at least one GT grasp
 
 ## Data Format
 
 **File naming convention:**
 ```
-images/               abc123.jpg           ← 1 image
-grasp_instructions/   abc123_1_1.pkl       ← multiple instructions per image
+images/               abc123.jpg           <- 1 image
+grasp_instructions/   abc123_1_1.pkl       <- multiple instructions per image
                       abc123_1_2.pkl
-grasp_label_positive/ abc123_1_1.pt        ← 1 label per instruction
+grasp_label_positive/ abc123_1_1.pt        <- 1 label per instruction
                       abc123_1_2.pt
 ```
 
-Each sample ID (e.g., `abc123_1_1`) maps to one instruction + one label. The corresponding image is found by stripping the `_N_N` suffix → `abc123.jpg`.
+Each sample ID (e.g., `abc123_1_1`) maps to one instruction + one label. The corresponding image is found by stripping the `_N_N` suffix.
 
 **Label format:** `[N, 6]` tensor per sample
 - Column 0: quality/confidence score (discarded)
 - Columns 1-5: `(x, y, w, h, angle_deg)` in pixel coordinates
 
-Parsed to: `[N, 5]` normalized `(x, y, w, h, θ_rad)` for training, output converted to degrees.
+Parsed to: `[N, 5]` normalized `(x, y, w, h, theta_rad)` for training.
+
+## Configuration
+
+Edit `configs/default.yaml` to change:
+- Model: `d_model`, `max_seq_len`, `bert_model`
+- Training: lr, batch size, epochs, scheduler, warmup
+- Loss weights: center, size, angle
+- Data split ratios
+- Evaluation thresholds (IoU, angle)
+- Checkpoint saving frequency and top-k retention
 
 ## Datasets
 
 - [Grasp-Anything](https://huggingface.co/datasets/airvlab/Grasp-Anything) — RGB images
 - [Grasp-Anything-pp](https://huggingface.co/datasets/airvlab/Grasp-Anything-pp) — Grasp instructions + labels
-
-## Configuration
-
-Edit `configs/default.yaml` to change:
-- Model architecture (CLIP variant, head size, dropout)
-- Training hyperparameters (lr, batch size, epochs, scheduler)
-- Loss weights (xy, wh, angle)
-- Data split ratios (val_split, test_split)
-- Evaluation thresholds (IoU, angle)
-- Checkpoint saving frequency and top-k retention
 
 ## Citation
 

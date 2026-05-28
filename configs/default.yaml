@@ -1,13 +1,11 @@
 # Grasp-Anything Configuration
 
 model:
-  name: "grasp_clip"
+  name: "grasp_detection"
   image_size: 416
-  clip_model: "openai/clip-vit-base-patch16"
-  freeze_clip: false
-  freeze_clip_epochs: 5  # freeze CLIP for first N epochs, then fine-tune
-  grasp_head_hidden: 512
-  dropout: 0.1
+  d_model: 512
+  max_seq_len: 128
+  bert_model: "bert-base-uncased"
 
 training:
   batch_size: 16
@@ -24,8 +22,8 @@ training:
   mixed_precision: true
 
 loss:
-  xy_weight: 1.0
-  wh_weight: 1.0
+  center_weight: 1.0
+  size_weight: 1.0
   angle_weight: 1.0
   smooth_l1_beta: 0.5
 
@@ -39,8 +37,8 @@ checkpoint:
   save_dir: "./checkpoints"
   save_every: 5
   keep_top_k: 3
-  resume: null  # path to checkpoint to resume from
+  resume: null
 
 eval:
   iou_threshold: 0.25
-  angle_threshold: 30  # degrees
+  angle_threshold: 30
