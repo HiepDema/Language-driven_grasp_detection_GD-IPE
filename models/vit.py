@@ -1,5 +1,6 @@
 import torch
 import torch.nn as nn
+from .cnn import PositionalEncoding2D
 
 
 class PatchEmbedding(nn.Module):
@@ -84,6 +85,7 @@ class ViTBackbone(nn.Module):
     ):
         super().__init__()
         self.d_model = d_model
+        self.pe = PositionalEncoding2D(in_channels, img_size)
         num_patches = (img_size // patch_size) ** 2
 
         self.patch_embed = PatchEmbedding(img_size, patch_size, in_channels, embed_dim)
@@ -103,6 +105,7 @@ class ViTBackbone(nn.Module):
 
     def forward(self, x):
         B = x.shape[0]
+        x = self.pe(x)
         x = self.patch_embed(x)
 
         cls_tokens = self.cls_token.expand(B, -1, -1)
