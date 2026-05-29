@@ -257,6 +257,15 @@ def get_grasp_dataloader(
         dataset, [train_size, val_size, test_size], generator=generator
     )
 
+    def seed_worker(worker_id):
+        worker_seed = seed + worker_id
+        import random as _random
+        import numpy as _np
+        _random.seed(worker_seed)
+        _np.random.seed(worker_seed)
+
+    g = torch.Generator().manual_seed(seed)
+
     train_loader = DataLoader(
         train_dataset,
         batch_size=batch_size,
@@ -265,6 +274,8 @@ def get_grasp_dataloader(
         collate_fn=grasp_collate_fn,
         pin_memory=True,
         drop_last=True,
+        worker_init_fn=seed_worker,
+        generator=g,
     )
 
     val_loader = DataLoader(

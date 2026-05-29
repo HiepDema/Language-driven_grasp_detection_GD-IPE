@@ -8,7 +8,7 @@ model:
   bert_model: "bert-base-uncased"
 
 training:
-  batch_size: 16
+  batch_size: 32
   num_epochs: 50
   lr: 1.0e-4
   weight_decay: 1.0e-4

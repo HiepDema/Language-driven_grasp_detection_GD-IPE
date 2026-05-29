@@ -161,9 +161,16 @@ def main():
     if device.type == "cuda":
         print(f"GPU: {torch.cuda.get_device_name(0)}")
 
-    torch.manual_seed(cfg["training"]["seed"])
+    import random
+    import numpy as np
+    seed = cfg["training"]["seed"]
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
     if device.type == "cuda":
-        torch.cuda.manual_seed_all(cfg["training"]["seed"])
+        torch.cuda.manual_seed_all(seed)
+        torch.backends.cudnn.deterministic = True
+        torch.backends.cudnn.benchmark = False
 
     # Data
     print("\nLoading data...")
