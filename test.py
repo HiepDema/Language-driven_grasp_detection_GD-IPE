@@ -54,18 +54,19 @@ def test_model():
     print(f"  Output keys: {list(output.keys())}")
     print(f"  center shape: {output['center'].shape}")
     print(f"  size shape: {output['size'].shape}")
-    print(f"  sin_theta_half shape: {output['sin_theta_half'].shape}")
+    print(f"  sin2_cos2 shape: {output['sin2_cos2'].shape}")
 
     assert output["center"].shape == (2, 2)
     assert output["size"].shape == (2, 2)
-    assert output["sin_theta_half"].shape == (2, 1)
+    assert output["sin2_cos2"].shape == (2, 2)
 
     center = output["center"][0].detach().numpy()
     size = output["size"][0].detach().numpy()
-    sin_val = output["sin_theta_half"][0].detach().numpy()
+    sin2_cos2 = output["sin2_cos2"][0].detach().numpy()
     assert (center >= 0).all() and (center <= 1).all(), "center should be in [0, 1]"
     assert (size >= 0).all() and (size <= 1).all(), "size should be in [0, 1]"
-    assert (sin_val >= 0).all() and (sin_val <= 1).all(), "sin_theta_half should be in [0, 1]"
+    assert (sin2_cos2 >= 0).all() and (sin2_cos2 <= 1).all(), "sin2_cos2 should be in [0, 1]"
+    assert abs(sin2_cos2.sum() - 1.0) < 1e-5, "sin2_cos2 should sum to 1 (softmax)"
 
     params = pred_to_params(output)
     assert params.shape == (2, 5)
@@ -84,12 +85,14 @@ def test_loss():
 
     criterion = GraspLoss()
 
+    # theta=pi/2 -> half=pi/4 -> sin2=0.5, cos2=0.5
+    import math
     pred = {
         "center": torch.tensor([[0.5, 0.5]]),
         "size": torch.tensor([[0.3, 0.2]]),
-        "sin_theta_half": torch.tensor([[0.5]]),
+        "sin2_cos2": torch.tensor([[0.5, 0.5]]),
     }
-    target = [torch.tensor([[0.5, 0.5, 0.3, 0.2, 0.0]])]
+    target = [torch.tensor([[0.5, 0.5, 0.3, 0.2, math.pi / 2]])]
 
     losses = criterion(pred, target)
     print(f"  Total loss: {losses['total'].item():.6f}")
@@ -114,12 +117,13 @@ def test_metrics():
 
     metrics = GraspMetrics(iou_threshold=0.25, angle_threshold=30.0)
 
+    # theta=pi/2 -> half=pi/4 -> sin2=0.5, cos2=0.5
     pred = {
         "center": torch.tensor([[0.5, 0.5]]),
         "size": torch.tensor([[0.3, 0.2]]),
-        "sin_theta_half": torch.tensor([[0.3827]]),  # sin(pi/4 / 2) ~ sin(22.5deg)
+        "sin2_cos2": torch.tensor([[0.5, 0.5]]),
     }
-    gt = [torch.tensor([[0.5, 0.5, 0.3, 0.2, 0.0]])]
+    gt = [torch.tensor([[0.5, 0.5, 0.3, 0.2, math.pi / 2]])]
     metrics.update(pred, gt)
 
     results = metrics.compute()
@@ -253,8 +257,8 @@ def test_training_step():
     input_ids = tokens["input_ids"].to(device)
     attention_mask = tokens["attention_mask"].to(device)
     targets = [
-        torch.tensor([[0.5, 0.5, 0.3, 0.2, 0.1]]),
-        torch.tensor([[0.3, 0.7, 0.2, 0.15, -0.2]]),
+        torch.tensor([[0.5, 0.5, 0.3, 0.2, 0.5]]),
+        torch.tensor([[0.3, 0.7, 0.2, 0.15, 1.2]]),
     ]
 
     model.train()

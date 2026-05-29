@@ -18,10 +18,9 @@ class GraspLoss(nn.Module):
     Model outputs:
         - center: [B, 2] in [0, 1]
         - size: [B, 2] in [0, 1]
-        - sin_theta_half: [B, 1] in [0, 1]
+        - sin2_cos2: [B, 2] softmax probabilities representing (sin^2(theta/2), cos^2(theta/2))
 
-    GT format: [N, 5] as (x, y, w, h, theta) where theta in radians.
-    theta in [0, pi] -> sin(theta/2) in [0, 1].
+    GT format: [N, 5] as (x, y, w, h, theta) where theta in radians [0, pi).
     """
 
     def __init__(
@@ -37,7 +36,7 @@ class GraspLoss(nn.Module):
         self.angle_weight = angle_weight
         self.smooth_l1_beta = smooth_l1_beta
 
-    def _single_loss(self, pred_center, pred_size, pred_sin_theta_half, target):
+    def _single_loss(self, pred_center, pred_size, pred_sin2_cos2, target):
         """Compute loss between one prediction and one GT grasp [5]."""
         target_xy = target[:2]
         target_wh = target[2:4]
@@ -46,11 +45,12 @@ class GraspLoss(nn.Module):
         center_loss = F.smooth_l1_loss(pred_center, target_xy, beta=self.smooth_l1_beta)
         size_loss = F.smooth_l1_loss(pred_size, target_wh, beta=self.smooth_l1_beta)
 
-        # Convert theta from [-pi/2, pi/2] to [0, pi] then compute sin(theta/2)
-        # GT theta is in [-pi/2, pi/2], shift to [0, pi]
-        theta_shifted = target_theta + math.pi / 2
-        target_sin = torch.sin(theta_shifted / 2).unsqueeze(0)
-        angle_loss = F.mse_loss(pred_sin_theta_half, target_sin)
+        # GT theta in [0, pi]
+        half = target_theta / 2
+        target_sin2 = torch.sin(half) ** 2
+        target_cos2 = torch.cos(half) ** 2
+        target_vec = torch.stack([target_sin2, target_cos2])
+        angle_loss = F.mse_loss(pred_sin2_cos2, target_vec)
 
         total = (
             self.center_weight * center_loss
@@ -62,7 +62,7 @@ class GraspLoss(nn.Module):
     def forward(self, pred: dict, targets: list) -> dict:
         """
         Args:
-            pred: dict with keys "center" [B,2], "size" [B,2], "sin_theta_half" [B,1]
+            pred: dict with keys "center" [B,2], "size" [B,2], "sin2_cos2" [B,2]
             targets: list of [N_i, 5] tensors, one per sample in batch.
 
         Returns:
@@ -78,24 +78,24 @@ class GraspLoss(nn.Module):
         for i in range(batch_size):
             pred_center = pred["center"][i]
             pred_size = pred["size"][i]
-            pred_sin = pred["sin_theta_half"][i]
+            pred_sin2_cos2 = pred["sin2_cos2"][i]
             gt_grasps = targets[i]
 
             if gt_grasps.shape[0] == 1:
                 loss, c_l, s_l, a_l = self._single_loss(
-                    pred_center, pred_size, pred_sin, gt_grasps[0]
+                    pred_center, pred_size, pred_sin2_cos2, gt_grasps[0]
                 )
             else:
                 losses = []
                 for j in range(gt_grasps.shape[0]):
                     l, _, _, _ = self._single_loss(
-                        pred_center, pred_size, pred_sin, gt_grasps[j]
+                        pred_center, pred_size, pred_sin2_cos2, gt_grasps[j]
                     )
                     losses.append(l)
                 losses_t = torch.stack(losses)
                 best_idx = torch.argmin(losses_t)
                 loss, c_l, s_l, a_l = self._single_loss(
-                    pred_center, pred_size, pred_sin, gt_grasps[best_idx]
+                    pred_center, pred_size, pred_sin2_cos2, gt_grasps[best_idx]
                 )
 
             total_loss = total_loss + loss

@@ -91,7 +91,7 @@ def parse_grasp_label(label_tensor: torch.Tensor, image_size: int = 416) -> torc
 def _normalize_params_with_deg_angle(params: torch.Tensor, image_size: int) -> torch.Tensor:
     """
     Normalize (x, y, w, h, angle_deg) from pixel space.
-    Angle is expected in degrees [0, 180) and converted to radians [-pi/2, pi/2].
+    Angle is expected in degrees [0, 180) and converted to radians [0, pi).
     """
     x, y, w, h, angle_deg = params[0], params[1], params[2], params[3], params[4]
 
@@ -100,11 +100,7 @@ def _normalize_params_with_deg_angle(params: torch.Tensor, image_size: int) -> t
     w = w / image_size
     h = h / image_size
 
-    # Convert degrees [0, 180) to radians [-pi/2, pi/2]
-    angle_rad = float(angle_deg)
-    if angle_rad > 90.0:
-        angle_rad = angle_rad - 180.0
-    angle_rad = math.radians(angle_rad)
+    angle_rad = math.radians(float(angle_deg) % 180.0)
 
     x = torch.clamp(x, 0.0, 1.0)
     y = torch.clamp(y, 0.0, 1.0)
@@ -133,7 +129,10 @@ def _normalize_params(params: torch.Tensor, image_size: int) -> torch.Tensor:
     if abs(theta) > math.pi:
         theta = torch.tensor(math.radians(float(theta)), dtype=torch.float32)
 
-    return torch.tensor([float(x), float(y), float(w), float(h), float(theta)], dtype=torch.float32)
+    # Normalize theta to [0, pi)
+    theta = float(theta) % math.pi
+
+    return torch.tensor([float(x), float(y), float(w), float(h), theta], dtype=torch.float32)
 
 
 def _corners_to_params(corners: torch.Tensor, image_size: int) -> torch.Tensor:
@@ -147,6 +146,7 @@ def _corners_to_params(corners: torch.Tensor, image_size: int) -> torch.Tensor:
     h = np.sqrt((pts[2, 0] - pts[1, 0]) ** 2 + (pts[2, 1] - pts[1, 1]) ** 2)
 
     theta = math.atan2(pts[1, 1] - pts[0, 1], pts[1, 0] - pts[0, 0])
+    theta = theta % math.pi
 
     cx /= image_size
     cy /= image_size
