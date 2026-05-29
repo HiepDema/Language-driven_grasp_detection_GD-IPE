@@ -23,7 +23,7 @@ class GraspDetectionModel(nn.Module):
     """
     Language-driven grasp detection model.
     Input: image (B, 3, 416, 416), input_ids (B, seq_len), attention_mask (B, seq_len)
-    Output: dict with center (x,y), size (w,h), sin2_cos2 (sin^2(theta/2), cos^2(theta/2))
+    Output: dict with center (x,y), size (w,h), sin(theta/2)
     """
 
     def __init__(self, d_model=512):
@@ -55,7 +55,8 @@ class GraspDetectionModel(nn.Module):
         self.angle_head = nn.Sequential(
             nn.Linear(d_model, d_model // 2),
             nn.ReLU(),
-            nn.Linear(d_model // 2, 2),
+            nn.Linear(d_model // 2, 1),
+            nn.Sigmoid(),
         )
 
         self.size_head = nn.Sequential(
@@ -77,8 +78,7 @@ class GraspDetectionModel(nn.Module):
 
         F = self.b_mlp(B) + self.d_mlp(D)
 
-        angle_logits = self.angle_head(F)
-        angle_probs = torch.softmax(angle_logits, dim=-1)
+        sin_theta_half = self.angle_head(F)
 
         EF = torch.cat([E, F], dim=-1)
         size = self.size_head(EF)
@@ -86,5 +86,5 @@ class GraspDetectionModel(nn.Module):
         return {
             "center": center,
             "size": size,
-            "sin2_cos2": angle_probs,
+            "sin_theta_half": sin_theta_half,
         }

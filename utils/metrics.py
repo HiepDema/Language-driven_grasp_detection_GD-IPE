@@ -75,17 +75,16 @@ def compute_grasp_iou(pred_params, gt_params, image_size: int = 416) -> float:
 def pred_to_params(pred: dict) -> torch.Tensor:
     """
     Convert model output dict to [B, 5] params tensor (x, y, w, h, theta).
-    sin2_cos2: [B, 2] softmax probs = (sin^2(theta/2), cos^2(theta/2))
-    -> theta/2 = atan2(sqrt(sin2), sqrt(cos2))
-    -> theta in [0, pi)
+    sin_theta_half in [0,1] -> theta in [0, pi] -> shift to [-pi/2, pi/2].
     """
     center = pred["center"]
     size = pred["size"]
-    sin2_cos2 = pred["sin2_cos2"]
+    sin_theta_half = pred["sin_theta_half"]
 
-    sin2 = sin2_cos2[:, 0:1].clamp(1e-7, 1.0)
-    cos2 = sin2_cos2[:, 1:2].clamp(1e-7, 1.0)
-    theta = 2 * torch.atan2(torch.sqrt(sin2), torch.sqrt(cos2))
+    # sin(theta/2) -> theta/2 -> theta (in [0, pi])
+    theta_shifted = 2 * torch.asin(sin_theta_half.clamp(-1 + 1e-6, 1 - 1e-6))
+    # Shift back to [-pi/2, pi/2]
+    theta = theta_shifted - math.pi / 2
 
     return torch.cat([center, size, theta], dim=-1)
 
@@ -113,7 +112,7 @@ class GraspMetrics:
         Update metrics with a batch.
 
         Args:
-            pred: model output dict with "center", "size", "sin2_cos2"
+            pred: model output dict with "center", "size", "sin_theta_half"
             gt_params_list: list of [N_i, 5] tensors
         """
         pred_params = pred_to_params(pred)
