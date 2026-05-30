@@ -181,7 +181,7 @@ def main():
 
     results_path = output_dir / "eval_results.json"
     with open(results_path, "w") as f:
-        json.dump(results, f, indent=2)
+        json.dump(results, f, indent=2, default=lambda x: float(x))
     print(f"\nResults saved to {results_path}")
 
     predictions_path = output_dir / "predictions.json"
