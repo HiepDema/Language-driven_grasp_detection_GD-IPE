@@ -16,9 +16,9 @@ grasp_anything/
 │   └── quick_test.yaml       # Quick test (3 epochs)
 ├── models/
 │   ├── __init__.py
-│   ├── cnn.py                # CNN backbone (lightweight, depthwise separable)
+│   ├── cnn.py                # CNN backbone (standard conv + residual blocks)
 │   ├── vit.py                # ViT backbone (patch-based transformer)
-│   ├── nlp.py                # Text encoder (frozen BERT embeddings + attention pooling)
+│   ├── nlp.py                # Text encoder (frozen BERT full encoder + attention pooling)
 │   ├── grasp_detection.py    # Full grasp detection model (CNN + ViT + NLP + heads)
 │   ├── grasp_model.py        # (legacy) CLIP-based model
 │   └── grasp_head.py         # (legacy) Grasp prediction head
@@ -80,6 +80,7 @@ Training behavior:
 - Every epoch: train + validate, print metrics for both
 - Every N epochs: save periodic checkpoint (`epoch_005.pt`, `epoch_010.pt`, ...)
 - When val accuracy improves: save best checkpoint + run test set immediately
+- Early stopping: stops training if val accuracy doesn't improve for N epochs (default: patience=10)
 - End of training: load best checkpoint, run final test, report results
 
 ## Data Split
@@ -143,25 +144,25 @@ Image (3x416x416) ──┬── CNN Backbone ──► A (d_model) ──┐
                     │                                   │ Cross Attention(A, C)
                     └── ViT Backbone ──► B (d_model)    │         │
                                               │         │         ▼
-Text ──► BERT Embeddings ──┬── C (seq, 768) ──┘   E (d_model) ──► MLP ──► center (x, y)
-         + Pos Encoding    │                            │
+Text ──► BERT (full) ──────┬── C (seq, 768) ──┘   E (d_model) ──► Linear ──► center (x, y)
+                           │                            │
                            └── D (d_model)              │
                                      │                  │
                          B ──► MLP ──┤                  │
                                      + ──► F (d_model)  │
                          D ──► MLP ──┘        │         │
                                               ▼         │
-                              F ──► MLP ──► sin(θ/2)    │
+                              F ──► Linear ──► sin(θ/2)  │
                                                         │
-                                   [E, F] ──► MLP ──► size (w, h)
+                                   [E, F] ──► Linear ──► size (w, h)
 ```
 
 ### Components
 
-- **CNN Backbone** (`cnn.py`): Lightweight depthwise separable CNN with learnable positional encoding. ~410K params.
-- **ViT Backbone** (`vit.py`): Vision Transformer with 169 patches (32x32), 4 layers, embed_dim=256. ~3.1M params.
-- **Text Encoder** (`nlp.py`): Frozen BERT word embeddings + learnable positional encoding + attention pooling. ~1.1M trainable params.
-- **Grasp Detection** (`grasp_detection.py`): Combines all backbones with cross-attention and prediction heads.
+- **CNN Backbone** (`cnn.py`): Standard convolution CNN with learnable positional encoding and residual blocks.
+- **ViT Backbone** (`vit.py`): Vision Transformer with 169 patches (32x32), 4 layers, embed_dim=288, 6 heads.
+- **Text Encoder** (`nlp.py`): Full frozen BERT encoder (all 12 transformer layers) + attention pooling.
+- **Grasp Detection** (`grasp_detection.py`): Combines all backbones with cross-attention and lightweight prediction heads.
 
 ### Predictions
 
@@ -207,8 +208,9 @@ Parsed to: `[N, 5]` normalized `(x, y, w, h, theta_rad)` for training.
 
 Edit `configs/default.yaml` to change:
 - Model: `d_model`, `max_seq_len`, `bert_model`
-- Training: lr, batch size, epochs, scheduler, warmup
+- Training: lr, batch size, epochs, scheduler, warmup, weight_decay
 - Loss weights: center, size, angle
+- Early stopping: patience, min_delta
 - Data split ratios
 - Evaluation thresholds (IoU, angle)
 - Checkpoint saving frequency and top-k retention
