@@ -237,9 +237,15 @@ def main():
         start_epoch = ckpt["epoch"] + 1
         print(f"Resumed at epoch {start_epoch}")
 
+    # Early stopping
+    patience = cfg.get("early_stopping", {}).get("patience", 10)
+    min_delta = cfg.get("early_stopping", {}).get("min_delta", 0.001)
+    best_val_acc = 0.0
+    epochs_without_improvement = 0
+
     # Training loop
     print(f"\n{'='*60}")
-    print(f"Starting training for {num_epochs} epochs")
+    print(f"Starting training for {num_epochs} epochs (early stopping patience={patience})")
     print(f"{'='*60}\n")
 
     for epoch in range(start_epoch, num_epochs):
@@ -285,6 +291,18 @@ def main():
             print(f"  Test Accuracy: {test_metrics.get('accuracy', 0):.4f} "
                   f"(IoU: {test_metrics.get('iou_accuracy', 0):.4f}, "
                   f"Angle: {test_metrics.get('angle_accuracy', 0):.4f})")
+
+        # Early stopping check
+        if current_acc > best_val_acc + min_delta:
+            best_val_acc = current_acc
+            epochs_without_improvement = 0
+        else:
+            epochs_without_improvement += 1
+            print(f"  Early stopping: {epochs_without_improvement}/{patience} epochs without improvement")
+
+        if epochs_without_improvement >= patience:
+            print(f"\nEarly stopping triggered at epoch {epoch+1}. Best val accuracy: {best_val_acc:.4f}")
+            break
 
         print()
 

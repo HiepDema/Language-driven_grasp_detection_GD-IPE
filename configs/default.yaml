@@ -33,6 +33,10 @@ data:
   load_images: true
   augmentation: true
 
+early_stopping:
+  patience: 10
+  min_delta: 0.001
+  
 checkpoint:
   save_dir: "./checkpoints"
   save_every: 5
