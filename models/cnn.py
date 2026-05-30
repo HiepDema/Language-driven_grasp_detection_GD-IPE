@@ -2,14 +2,11 @@ import torch
 import torch.nn as nn
 
 
-class DepthwiseSeparableConv(nn.Module):
+class ConvBlock(nn.Module):
     def __init__(self, in_channels, out_channels, stride=1):
         super().__init__()
         self.block = nn.Sequential(
-            nn.Conv2d(in_channels, in_channels, 3, stride, 1, groups=in_channels, bias=False),
-            nn.BatchNorm2d(in_channels),
-            nn.ReLU(inplace=True),
-            nn.Conv2d(in_channels, out_channels, 1, bias=False),
+            nn.Conv2d(in_channels, out_channels, 3, stride, 1, bias=False),
             nn.BatchNorm2d(out_channels),
             nn.ReLU(inplace=True),
         )
@@ -95,25 +92,25 @@ class CNNBackbone(nn.Module):
 
         # ── Stage 4~7: giảm kích thước, tăng kênh ─────────────────────
         self.stage4 = nn.Sequential(                # 208→104, 12→64
-            DepthwiseSeparableConv(12,  64,  stride=2),
+            ConvBlock(12,  64,  stride=2),
             ResidualBlock(64),
             ResidualBlock(64),
         )
 
         self.stage5 = nn.Sequential(                # 104→52, 64→128
-            DepthwiseSeparableConv(64,  128, stride=2),
+            ConvBlock(64,  128, stride=2),
             ResidualBlock(128),
             ResidualBlock(128),
         )
 
         self.stage6 = nn.Sequential(                # 52→26, 128→256
-            DepthwiseSeparableConv(128, 256, stride=2),
+            ConvBlock(128, 256, stride=2),
             ResidualBlock(256),
             ResidualBlock(256),
         )
 
         self.stage7 = nn.Sequential(                # 26→13, 256→512
-            DepthwiseSeparableConv(256, 512, stride=2),
+            ConvBlock(256, 512, stride=2),
             ResidualBlock(512),
         )
 
