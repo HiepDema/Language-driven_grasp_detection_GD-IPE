@@ -137,26 +137,6 @@ python test.py              # Run all tests
 python test.py --test model # Test model forward pass only
 ```
 
-## Model Architecture
-
-```
-Image (3x416x416) ──┬── CNN Backbone ──► A (d_model) ──┐
-                    │                                   │ Cross Attention(A, C)
-                    └── ViT Backbone ──► B (d_model)    │         │
-                                              │         │         ▼
-Text ──► BERT (full) ──────┬── C (seq, 768) ──┘   E (d_model) ──► Linear ──► center (x, y)
-                           │                            │
-                           └── D (d_model)              │
-                                     │                  │
-                         B ──► MLP ──┤                  │
-                                     + ──► F (d_model)  │
-                         D ──► MLP ──┘        │         │
-                                              ▼         │
-                              F ──► Linear ──► sin(θ/2)  │
-                                                        │
-                                   [E, F] ──► Linear ──► size (w, h)
-```
-
 ### Components
 
 - **CNN Backbone** (`cnn.py`): Standard convolution CNN with learnable positional encoding and residual blocks.
@@ -223,10 +203,12 @@ Edit `configs/default.yaml` to change:
 ## Citation
 
 ```bibtex
-@article{vuong2023grasp,
-  title={Grasp-Anything: Large-scale Grasp Dataset from Foundation Models},
-  author={Vuong, An Dinh and Vu, Minh Nhat and Le, Baoru and Huang, Jie and Huynh, Binh and Vo, Thieu and Recently, Andreas and Vu, Ngan and Nguyen, Anh},
-  journal={arXiv preprint arXiv:2309.09818},
-  year={2023}
+@InProceedings{Vuong2024grasp,
+    author    = {Vuong, An Dinh and Vu, Minh Nhat and Huang, Baoru and Nguyen, Nghia and Le, Hieu and Vo, Thieu and Nguyen, Anh},
+    title     = {Language-driven Grasp Detection},
+    booktitle = {Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR)},
+    month     = {June},
+    year      = {2024},
+    pages     = {17902-17912}
 }
 ```

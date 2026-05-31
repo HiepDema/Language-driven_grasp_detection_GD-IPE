@@ -1,16 +1,6 @@
 """
 Convenience script: Download 30K subset and verify the DataLoader works.
 
-This script handles the full pipeline:
-  1. Downloads grasp_instructions.zip (~1.54 GB) from Grasp-Anything-pp
-  2. Downloads grasp_label_positive.zip (~3.95 GB) from Grasp-Anything-pp
-  3. Downloads image_part_aa + image_part_ab (~65 GB) from Grasp-Anything
-  4. Extracts 30,000 matched samples
-  5. Verifies DataLoader works
-
-NOTE: If you don't have enough storage for images (65 GB),
-      run with --skip_images to download only instructions + labels first.
-
 Usage:
     # Full download (needs ~70 GB free space):
     python run_download.py

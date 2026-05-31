@@ -19,13 +19,6 @@ class AttentionPooling(nn.Module):
 
 
 class TextEncoder(nn.Module):
-    """
-    Text encoder using frozen BERT embeddings + learnable positional encoding + attention pooling.
-    Input: input_ids (B, seq_len), attention_mask (B, seq_len)
-    Output: (token_features, sentence_vector)
-        - token_features: (B, seq_len, 768) — token embeddings + positional encoding
-        - sentence_vector: (B, d_model) — pooled representation
-    """
 
     def __init__(self, d_model=512, max_seq_len=128):
         super().__init__()

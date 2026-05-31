@@ -63,13 +63,6 @@ class TransformerBlock(nn.Module):
 
 
 class ViTBackbone(nn.Module):
-    """
-    Vision Transformer backbone for feature extraction.
-    Input: (B, 3, 416, 416)
-    Output: (B, d_model)
-
-    Default: 416/32 = 13 -> 13x13 = 169 patches
-    """
 
     def __init__(
         self,

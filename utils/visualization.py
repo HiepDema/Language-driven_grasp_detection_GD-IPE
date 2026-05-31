@@ -1,7 +1,3 @@
-"""
-Visualization utilities for grasp rectangles.
-"""
-
 import math
 import numpy as np
 import cv2

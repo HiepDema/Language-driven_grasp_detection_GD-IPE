@@ -1,6 +1,4 @@
 """
-Loss functions for grasp pose prediction.
-
 Supports multi-grasp GT: for each sample, computes loss against ALL GT grasps
 and takes the minimum (best-matching GT grasp).
 """

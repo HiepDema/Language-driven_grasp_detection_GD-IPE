@@ -1,7 +1,3 @@
-"""
-Evaluation metrics for grasp pose prediction.
-"""
-
 import math
 import numpy as np
 import torch
@@ -31,14 +27,6 @@ def grasp_rect_vertices(x, y, w, h, theta):
 def compute_grasp_iou(pred_params, gt_params, image_size: int = 416) -> float:
     """
     Approximate IoU between predicted and ground truth grasp rectangles.
-
-    Args:
-        pred_params: (x, y, w, h, theta) - normalized [0,1] for x,y,w,h; radians for theta
-        gt_params: same format
-        image_size: image dimension for denormalization
-
-    Returns:
-        IoU value in [0, 1]
     """
     px, py, pw, ph, pt = [float(v) for v in pred_params]
     gx, gy, gw, gh, gt_angle = [float(v) for v in gt_params]
@@ -110,10 +98,6 @@ class GraspMetrics:
     def update(self, pred: dict, gt_params_list: list):
         """
         Update metrics with a batch.
-
-        Args:
-            pred: model output dict with "center", "size", "sin_theta_half"
-            gt_params_list: list of [N_i, 5] tensors
         """
         pred_params = pred_to_params(pred)
         pred_np = pred_params.detach().cpu().numpy()
