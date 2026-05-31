@@ -91,16 +91,32 @@ Training behavior:
 | Val   | 15%   | 4,500          | Model selection, hyperparameter tuning |
 | Test  | 15%   | 4,500          | Final evaluation, reported results |
 
+## Pretrained Checkpoint
+
+Download the pretrained `best.pt` from Google Drive:
+
+```bash
+pip install gdown
+gdown 15e8l87Vc-_fIQ_FxOO4ZORSOfoHeG9Nv -O checkpoints/best.pt
+```
+
+Or download manually: [best.pt (Google Drive)](https://drive.google.com/file/d/15e8l87Vc-_fIQ_FxOO4ZORSOfoHeG9Nv/view?usp=sharing) and place it in `checkpoints/best.pt`.
+
 ## Evaluation
 
 Evaluate on validation set:
 ```bash
-python eval.py --checkpoint checkpoints/best.pt --split val --visualize
+python eval.py --checkpoint checkpoints/best.pt --split val
 ```
 
 Evaluate on test set (final results):
 ```bash
-python eval.py --checkpoint checkpoints/best.pt --split test --visualize
+python eval.py --checkpoint checkpoints/best.pt --split test
+```
+
+Evaluate with visualization (saves result images to `outputs/visualizations/`):
+```bash
+python eval.py --checkpoint checkpoints/best.pt --split test --visualize --num_vis 20
 ```
 
 ## Visualization
