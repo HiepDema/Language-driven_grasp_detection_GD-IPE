@@ -1,4 +1,4 @@
-# Grasp-Anything: Language-Driven Grasp Pose Prediction
+# GD-IPE: Language-Driven Grasp Detection with Image Positional Encoding (IPE)
 
 Multi-modal model for predicting 5-DoF grasp rectangles from RGB images and natural language instructions.
 
